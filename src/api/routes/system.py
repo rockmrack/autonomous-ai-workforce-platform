@@ -1,6 +1,9 @@
 """System API Routes"""
 
+from datetime import datetime, timedelta
+
 from fastapi import APIRouter
+from sqlalchemy import select, func, and_
 
 from src.core.database import db_manager
 from src.core.cache import cache_manager
@@ -68,10 +71,31 @@ async def get_system_status():
             )
         )
 
-        # Revenue (simplified - would need proper aggregation in production)
+        # Revenue - total from all agents
         total_revenue = await session.scalar(
             select(func.sum(Agent.total_earnings))
         ) or 0
+
+        # Revenue - last 30 days from completed jobs
+        thirty_days_ago = datetime.utcnow() - timedelta(days=30)
+        revenue_30_days = await session.scalar(
+            select(func.sum(ActiveJob.payment_amount)).where(
+                and_(
+                    ActiveJob.status == JobStatus.COMPLETED,
+                    ActiveJob.completed_at >= thirty_days_ago
+                )
+            )
+        ) or 0
+
+        # Success rate - average across all active agents
+        avg_success_rate = await session.scalar(
+            select(func.avg(Agent.success_rate)).where(
+                and_(
+                    Agent.is_deleted == False,
+                    Agent.jobs_completed > 0
+                )
+            )
+        ) or 0.0
 
     return {
         "scheduler": scheduler_status,
@@ -86,11 +110,10 @@ async def get_system_status():
         },
         "revenue": {
             "total": float(total_revenue),
-            "last_30_days": float(total_revenue) * 0.15,  # Simplified
+            "last_30_days": float(revenue_30_days),
         },
         "metrics": {
-            "success_rate": 0.92,  # Would calculate from actual data
-            "avg_response_time_ms": 48,
+            "success_rate": round(float(avg_success_rate), 3),
         },
     }
 

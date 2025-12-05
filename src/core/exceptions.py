@@ -420,3 +420,195 @@ class ConfigurationError(WorkforceException):
             details={"config_key": config_key} if config_key else {},
             recoverable=False,
         )
+
+
+# ===========================================
+# Database Exceptions
+# ===========================================
+
+
+class DatabaseException(WorkforceException):
+    """Base exception for database errors"""
+
+    pass
+
+
+class DatabaseConnectionError(DatabaseException):
+    """Failed to connect to database"""
+
+    def __init__(self, error: str):
+        super().__init__(
+            message=f"Database connection failed: {error}",
+            code="DATABASE_CONNECTION_ERROR",
+            details={"error": error},
+            recoverable=True,
+        )
+
+
+class DatabaseQueryError(DatabaseException):
+    """Query execution failed"""
+
+    def __init__(self, operation: str, error: str):
+        super().__init__(
+            message=f"Database query failed during {operation}: {error}",
+            code="DATABASE_QUERY_ERROR",
+            details={"operation": operation, "error": error},
+            recoverable=True,
+        )
+
+
+class RecordNotFoundError(DatabaseException):
+    """Record not found in database"""
+
+    def __init__(self, entity_type: str, entity_id: str):
+        super().__init__(
+            message=f"{entity_type} not found: {entity_id}",
+            code="RECORD_NOT_FOUND",
+            details={"entity_type": entity_type, "entity_id": entity_id},
+            recoverable=False,
+        )
+
+
+class DuplicateRecordError(DatabaseException):
+    """Duplicate record error"""
+
+    def __init__(self, entity_type: str, field: str, value: str):
+        super().__init__(
+            message=f"Duplicate {entity_type}: {field}={value}",
+            code="DUPLICATE_RECORD",
+            details={"entity_type": entity_type, "field": field, "value": value},
+            recoverable=False,
+        )
+
+
+# ===========================================
+# Cache Exceptions
+# ===========================================
+
+
+class CacheException(WorkforceException):
+    """Base exception for cache errors"""
+
+    pass
+
+
+class CacheConnectionError(CacheException):
+    """Failed to connect to cache"""
+
+    def __init__(self, error: str):
+        super().__init__(
+            message=f"Cache connection failed: {error}",
+            code="CACHE_CONNECTION_ERROR",
+            details={"error": error},
+            recoverable=True,
+        )
+
+
+class CacheSerializationError(CacheException):
+    """Failed to serialize/deserialize cache data"""
+
+    def __init__(self, operation: str, key: str, error: str):
+        super().__init__(
+            message=f"Cache {operation} failed for key {key}: {error}",
+            code="CACHE_SERIALIZATION_ERROR",
+            details={"operation": operation, "key": key, "error": error},
+            recoverable=True,
+        )
+
+
+# ===========================================
+# Validation Exceptions
+# ===========================================
+
+
+class ValidationException(WorkforceException):
+    """Base exception for validation errors"""
+
+    pass
+
+
+class InvalidInputError(ValidationException):
+    """Invalid input data"""
+
+    def __init__(self, field: str, reason: str, value: Any = None):
+        super().__init__(
+            message=f"Invalid input for {field}: {reason}",
+            code="INVALID_INPUT",
+            details={"field": field, "reason": reason, "value": str(value) if value else None},
+            recoverable=False,
+        )
+
+
+class MissingRequiredFieldError(ValidationException):
+    """Required field missing"""
+
+    def __init__(self, field: str):
+        super().__init__(
+            message=f"Missing required field: {field}",
+            code="MISSING_REQUIRED_FIELD",
+            details={"field": field},
+            recoverable=False,
+        )
+
+
+class InvalidStateTransitionError(ValidationException):
+    """Invalid state transition"""
+
+    def __init__(self, entity_type: str, current_state: str, target_state: str):
+        super().__init__(
+            message=f"Invalid state transition for {entity_type}: {current_state} -> {target_state}",
+            code="INVALID_STATE_TRANSITION",
+            details={
+                "entity_type": entity_type,
+                "current_state": current_state,
+                "target_state": target_state,
+            },
+            recoverable=False,
+        )
+
+
+# ===========================================
+# External Service Exceptions
+# ===========================================
+
+
+class ExternalServiceException(WorkforceException):
+    """Base exception for external service errors"""
+
+    pass
+
+
+class ServiceUnavailableError(ExternalServiceException):
+    """External service is unavailable"""
+
+    def __init__(self, service: str, error: Optional[str] = None):
+        super().__init__(
+            message=f"Service unavailable: {service}",
+            code="SERVICE_UNAVAILABLE",
+            details={"service": service, "error": error},
+            recoverable=True,
+        )
+
+
+class ServiceTimeoutError(ExternalServiceException):
+    """External service timed out"""
+
+    def __init__(self, service: str, timeout_seconds: float):
+        super().__init__(
+            message=f"Service timeout: {service} (after {timeout_seconds}s)",
+            code="SERVICE_TIMEOUT",
+            details={"service": service, "timeout_seconds": timeout_seconds},
+            recoverable=True,
+        )
+
+
+class CircuitBreakerOpenError(ExternalServiceException):
+    """Circuit breaker is open"""
+
+    def __init__(self, service: str, failures: int, timeout: float):
+        super().__init__(
+            message=f"Circuit breaker open for {service} after {failures} failures",
+            code="CIRCUIT_BREAKER_OPEN",
+            details={"service": service, "failures": failures, "timeout_seconds": timeout},
+            recoverable=True,
+        )

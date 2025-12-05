@@ -9,7 +9,7 @@ from decimal import Decimal
 from typing import Optional
 from uuid import UUID
 
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import and_, case, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 import structlog
 
@@ -223,11 +223,43 @@ class AgentManager:
                     if profile and profile.is_at_risk():
                         continue
 
-                # TODO: Check active job count against limit
+                # Check active job count against limit
+                active_jobs = await self._get_active_job_count(session, agent.id)
+                max_concurrent = agent.metadata_json.get("max_concurrent_jobs", 3) if agent.metadata_json else 3
+                if active_jobs >= max_concurrent:
+                    logger.debug(
+                        "Agent at capacity",
+                        agent_id=str(agent.id),
+                        active_jobs=active_jobs,
+                        max_concurrent=max_concurrent,
+                    )
+                    continue
 
                 return agent
 
             return None
+
+    async def _get_active_job_count(
+        self,
+        session: AsyncSession,
+        agent_id: UUID,
+    ) -> int:
+        """Get count of active jobs for an agent"""
+        from src.discovery.models import ActiveJob, JobStatus
+
+        result = await session.execute(
+            select(func.count(ActiveJob.id)).where(
+                and_(
+                    ActiveJob.agent_id == agent_id,
+                    ActiveJob.status.in_([
+                        JobStatus.IN_PROGRESS,
+                        JobStatus.PENDING,
+                    ]),
+                    ActiveJob.is_deleted == False,
+                )
+            )
+        )
+        return result.scalar() or 0
 
     async def _get_platform_profile(
         self,
@@ -383,48 +415,48 @@ class AgentManager:
         }
 
     async def get_fleet_summary(self) -> dict:
-        """Get summary statistics for the entire agent fleet"""
+        """
+        Get summary statistics for the entire agent fleet.
+        Optimized: Uses single query with GROUP BY instead of N+1 queries per status.
+        """
         async with db_manager.session() as session:
-            # Count by status
-            status_counts = {}
-            for status in AgentStatus:
-                result = await session.execute(
-                    select(func.count(Agent.id)).where(
-                        and_(
-                            Agent.status == status,
-                            Agent.is_deleted == False,
-                        )
-                    )
-                )
-                status_counts[status.value] = result.scalar() or 0
-
-            # Total earnings
-            result = await session.execute(
-                select(func.sum(Agent.total_earnings)).where(Agent.is_deleted == False)
-            )
-            total_earnings = result.scalar() or Decimal("0")
-
-            # Total jobs
-            result = await session.execute(
+            # Single query for all status counts using GROUP BY
+            status_query = (
                 select(
-                    func.sum(Agent.jobs_completed),
-                    func.sum(Agent.jobs_failed),
-                ).where(Agent.is_deleted == False)
-            )
-            row = result.one()
-            total_completed = row[0] or 0
-            total_failed = row[1] or 0
-
-            # Average success rate
-            result = await session.execute(
-                select(func.avg(Agent.success_rate)).where(
-                    and_(
-                        Agent.is_deleted == False,
-                        Agent.jobs_completed > 0,
-                    )
+                    Agent.status,
+                    func.count(Agent.id).label("count"),
                 )
+                .where(Agent.is_deleted == False)
+                .group_by(Agent.status)
             )
-            avg_success_rate = result.scalar() or Decimal("0")
+            result = await session.execute(status_query)
+            status_rows = result.all()
+
+            # Build status counts dict with all statuses (default 0)
+            status_counts = {status.value: 0 for status in AgentStatus}
+            for row in status_rows:
+                status_counts[row.status.value] = row.count
+
+            # Single query for all aggregations
+            aggregation_query = select(
+                func.sum(Agent.total_earnings).label("total_earnings"),
+                func.sum(Agent.jobs_completed).label("jobs_completed"),
+                func.sum(Agent.jobs_failed).label("jobs_failed"),
+                func.avg(
+                    case(
+                        (Agent.jobs_completed > 0, Agent.success_rate),
+                        else_=None,
+                    )
+                ).label("avg_success_rate"),
+            ).where(Agent.is_deleted == False)
+
+            result = await session.execute(aggregation_query)
+            row = result.one()
+
+            total_earnings = row.total_earnings or Decimal("0")
+            total_completed = row.jobs_completed or 0
+            total_failed = row.jobs_failed or 0
+            avg_success_rate = row.avg_success_rate or Decimal("0")
 
             return {
                 "total_agents": sum(status_counts.values()),

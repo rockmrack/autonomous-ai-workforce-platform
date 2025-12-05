@@ -16,7 +16,8 @@ class DatabaseSettings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="DATABASE_")
 
     url: SecretStr = Field(
-        default="postgresql+asyncpg://user:password@localhost:5432/ai_workforce"
+        default=...,  # Required - no default credentials
+        description="Database connection URL (required)"
     )
     pool_size: int = Field(default=20, ge=5, le=100)
     max_overflow: int = Field(default=10, ge=0, le=50)
@@ -199,12 +200,32 @@ class Settings(BaseSettings):
     )
     log_format: Literal["json", "text"] = Field(default="json")
 
+    # API Authentication
+    api_key: SecretStr = Field(
+        default=...,  # Required - no default
+        description="API key for authentication (required)"
+    )
+    allowed_origins: list[str] = Field(
+        default=["http://localhost:3000"],
+        description="Allowed CORS origins"
+    )
+
     @field_validator("secret_key")
     @classmethod
     def validate_secret_key(cls, v: SecretStr) -> SecretStr:
-        if v.get_secret_value() == "change-me-in-production":
-            import warnings
-            warnings.warn("Using default secret key - change in production!")
+        secret = v.get_secret_value()
+        if secret == "change-me-in-production":
+            raise ValueError("SECRET_KEY must be changed from default value")
+        if len(secret) < 32:
+            raise ValueError("SECRET_KEY must be at least 32 characters")
+        return v
+
+    @field_validator("api_key")
+    @classmethod
+    def validate_api_key(cls, v: SecretStr) -> SecretStr:
+        key = v.get_secret_value()
+        if len(key) < 32:
+            raise ValueError("API_KEY must be at least 32 characters")
         return v
 
     @property

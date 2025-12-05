@@ -7,9 +7,11 @@ import asyncio
 import functools
 import hashlib
 import json
-import pickle
-from datetime import timedelta
+from datetime import datetime, timedelta
+from decimal import Decimal
+from enum import Enum
 from typing import Any, Callable, Optional, TypeVar, Union
+from uuid import UUID
 
 import redis.asyncio as redis
 import structlog
@@ -21,12 +23,58 @@ logger = structlog.get_logger(__name__)
 T = TypeVar("T")
 
 
+class SafeJSONEncoder(json.JSONEncoder):
+    """Custom JSON encoder that handles common non-serializable types safely"""
+
+    def default(self, obj: Any) -> Any:
+        if isinstance(obj, datetime):
+            return {"__type__": "datetime", "value": obj.isoformat()}
+        if isinstance(obj, UUID):
+            return {"__type__": "uuid", "value": str(obj)}
+        if isinstance(obj, Decimal):
+            return {"__type__": "decimal", "value": str(obj)}
+        if isinstance(obj, Enum):
+            return {"__type__": "enum", "class": obj.__class__.__name__, "value": obj.value}
+        if isinstance(obj, bytes):
+            return {"__type__": "bytes", "value": obj.decode("utf-8", errors="replace")}
+        if isinstance(obj, set):
+            return {"__type__": "set", "value": list(obj)}
+        # Fallback for other types
+        try:
+            return str(obj)
+        except Exception:
+            return f"<non-serializable: {type(obj).__name__}>"
+
+
+def safe_json_decoder(dct: dict) -> Any:
+    """Custom JSON decoder that restores special types"""
+    if "__type__" in dct:
+        type_name = dct["__type__"]
+        value = dct.get("value")
+
+        if type_name == "datetime":
+            return datetime.fromisoformat(value)
+        if type_name == "uuid":
+            return UUID(value)
+        if type_name == "decimal":
+            return Decimal(value)
+        if type_name == "set":
+            return set(value)
+        if type_name == "bytes":
+            return value.encode("utf-8")
+        # For enum, return just the value (we lose the enum class info)
+        if type_name == "enum":
+            return value
+
+    return dct
+
+
 class CacheManager:
     """
     Centralized cache management with Redis backend.
 
     Features:
-    - Multiple serialization formats (JSON, pickle)
+    - Safe JSON serialization (no pickle - security risk)
     - Automatic key namespacing
     - TTL management
     - Cache tags for group invalidation
@@ -68,23 +116,24 @@ class CacheManager:
         prefix = f"ai_workforce:{namespace}:" if namespace else "ai_workforce:"
         return f"{prefix}{key}"
 
-    def _serialize(self, value: Any, use_json: bool = True) -> bytes:
-        """Serialize value for storage"""
-        if use_json:
-            return json.dumps(value, default=str).encode("utf-8")
-        return pickle.dumps(value)
+    def _serialize(self, value: Any) -> bytes:
+        """
+        Serialize value for storage using safe JSON encoding.
+        Note: pickle has been removed due to security risks (arbitrary code execution).
+        """
+        return json.dumps(value, cls=SafeJSONEncoder).encode("utf-8")
 
-    def _deserialize(self, data: bytes, use_json: bool = True) -> Any:
-        """Deserialize stored value"""
-        if use_json:
-            return json.loads(data.decode("utf-8"))
-        return pickle.loads(data)
+    def _deserialize(self, data: bytes) -> Any:
+        """
+        Deserialize stored value using safe JSON decoding.
+        Note: pickle has been removed due to security risks.
+        """
+        return json.loads(data.decode("utf-8"), object_hook=safe_json_decoder)
 
     async def get(
         self,
         key: str,
         namespace: Optional[str] = None,
-        use_json: bool = True,
     ) -> Optional[Any]:
         """Get a value from cache"""
         full_key = self._make_key(key, namespace)
@@ -92,9 +141,17 @@ class CacheManager:
             data = await self.client.get(full_key)
             if data is None:
                 return None
-            return self._deserialize(data, use_json)
+            return self._deserialize(data)
+        except json.JSONDecodeError as e:
+            logger.warning("Cache deserialization failed", key=full_key, error=str(e))
+            # Delete corrupted cache entry
+            await self.client.delete(full_key)
+            return None
+        except redis.RedisError as e:
+            logger.warning("Cache get failed (Redis error)", key=full_key, error=str(e))
+            return None
         except Exception as e:
-            logger.warning("Cache get failed", key=full_key, error=str(e))
+            logger.error("Cache get failed (unexpected)", key=full_key, error=str(e), exc_info=True)
             return None
 
     async def set(
@@ -103,13 +160,12 @@ class CacheManager:
         value: Any,
         ttl: Optional[Union[int, timedelta]] = None,
         namespace: Optional[str] = None,
-        use_json: bool = True,
         tags: Optional[list[str]] = None,
     ) -> bool:
         """Set a value in cache"""
         full_key = self._make_key(key, namespace)
         try:
-            data = self._serialize(value, use_json)
+            data = self._serialize(value)
 
             if isinstance(ttl, timedelta):
                 ttl = int(ttl.total_seconds())
@@ -125,8 +181,14 @@ class CacheManager:
                         await self.client.expire(tag_key, ttl + 3600)
 
             return True
+        except (TypeError, ValueError) as e:
+            logger.warning("Cache serialization failed", key=full_key, error=str(e))
+            return False
+        except redis.RedisError as e:
+            logger.warning("Cache set failed (Redis error)", key=full_key, error=str(e))
+            return False
         except Exception as e:
-            logger.warning("Cache set failed", key=full_key, error=str(e))
+            logger.error("Cache set failed (unexpected)", key=full_key, error=str(e), exc_info=True)
             return False
 
     async def delete(self, key: str, namespace: Optional[str] = None) -> bool:
@@ -158,10 +220,9 @@ class CacheManager:
         factory: Callable[[], Any],
         ttl: Optional[Union[int, timedelta]] = None,
         namespace: Optional[str] = None,
-        use_json: bool = True,
     ) -> Any:
         """Get from cache or compute and cache the result"""
-        value = await self.get(key, namespace, use_json)
+        value = await self.get(key, namespace)
         if value is not None:
             return value
 
@@ -171,7 +232,7 @@ class CacheManager:
         else:
             value = factory()
 
-        await self.set(key, value, ttl, namespace, use_json)
+        await self.set(key, value, ttl, namespace)
         return value
 
     async def increment(

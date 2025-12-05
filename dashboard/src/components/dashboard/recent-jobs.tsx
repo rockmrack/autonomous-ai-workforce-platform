@@ -1,11 +1,24 @@
 'use client'
 
+import { useQuery } from '@tanstack/react-query'
 import { motion } from 'framer-motion'
-import { ExternalLink, DollarSign, Clock } from 'lucide-react'
+import { ExternalLink, DollarSign, Clock, RefreshCw } from 'lucide-react'
 import { cn, formatCurrency, getStatusBgColor } from '@/lib/utils'
+import { apiClient } from '@/lib/api'
 
-// Mock data
-const jobs = [
+interface Job {
+  id: string
+  title: string
+  platform: string
+  budget: number
+  status: string
+  deadline: string
+  progress: number
+  agent_name?: string
+}
+
+// Fallback mock data for when API is unavailable
+const mockJobs: Job[] = [
   {
     id: '1',
     title: 'Full Stack Developer for E-commerce Platform',
@@ -14,7 +27,7 @@ const jobs = [
     status: 'in_progress',
     deadline: '2024-01-20',
     progress: 65,
-    agent: 'Alex Thompson',
+    agent_name: 'Alex Thompson',
   },
   {
     id: '2',
@@ -24,31 +37,19 @@ const jobs = [
     status: 'pending',
     deadline: '2024-01-18',
     progress: 0,
-    agent: 'Sarah Chen',
-  },
-  {
-    id: '3',
-    title: 'Logo and Brand Identity Design',
-    platform: 'Upwork',
-    budget: 1200,
-    status: 'completed',
-    deadline: '2024-01-15',
-    progress: 100,
-    agent: 'Emily Watson',
-  },
-  {
-    id: '4',
-    title: 'Data Analysis and Reporting',
-    platform: 'Reddit',
-    budget: 600,
-    status: 'in_progress',
-    deadline: '2024-01-22',
-    progress: 30,
-    agent: 'Mike Rodriguez',
+    agent_name: 'Sarah Chen',
   },
 ]
 
 export function RecentJobs() {
+  const { data, isLoading, error } = useQuery<{ jobs: Job[] }>({
+    queryKey: ['active-jobs'],
+    queryFn: () => apiClient.get('/jobs', { params: { limit: 5 } }).then(res => res.data),
+    refetchInterval: 60000, // Refresh every minute
+  })
+
+  const jobs = data?.jobs || (error ? mockJobs : [])
+
   return (
     <div className="rounded-xl border bg-card p-6 shadow-sm">
       <div className="flex items-center justify-between mb-4">
@@ -58,6 +59,11 @@ export function RecentJobs() {
         </button>
       </div>
 
+      {isLoading ? (
+        <div className="flex items-center justify-center py-12">
+          <RefreshCw className="h-6 w-6 animate-spin text-muted-foreground" />
+        </div>
+      ) : (
       <div className="space-y-4">
         {jobs.map((job, index) => (
           <motion.div
@@ -115,15 +121,18 @@ export function RecentJobs() {
               </div>
             )}
 
-            <div className="mt-3 flex items-center gap-2">
-              <div className="h-6 w-6 rounded-full bg-gradient-to-br from-brand-400 to-brand-600 flex items-center justify-center text-white text-[10px] font-medium">
-                {job.agent.split(' ').map(n => n[0]).join('')}
+            {job.agent_name && (
+              <div className="mt-3 flex items-center gap-2">
+                <div className="h-6 w-6 rounded-full bg-gradient-to-br from-brand-400 to-brand-600 flex items-center justify-center text-white text-[10px] font-medium">
+                  {job.agent_name.split(' ').map(n => n[0]).join('')}
+                </div>
+                <span className="text-xs text-muted-foreground">{job.agent_name}</span>
               </div>
-              <span className="text-xs text-muted-foreground">{job.agent}</span>
-            </div>
+            )}
           </motion.div>
         ))}
       </div>
+      )}
     </div>
   )
 }

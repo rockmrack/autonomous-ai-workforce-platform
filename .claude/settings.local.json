@@ -1,7 +1,9 @@
 {
   "permissions": {
     "allow": [
-      "Bash(git add:*)"
+      "Bash(git add:*)",
+      "Bash(git commit -m \"$(cat <<''EOF''\nAdd complete AI Workforce Platform with 10x enhancements\n\n- Multi-model AI orchestration (Anthropic Claude, OpenAI GPT)\n- ML-powered job scoring and success prediction\n- Comprehensive agent management with persona generation\n- Multi-platform job discovery (Upwork, Fiverr, Reddit)\n- Task execution engine with specialized executors\n- Intelligent bidding with A/B tested proposals\n- Communication handler with sentiment analysis\n- Quality assurance with plagiarism/AI detection\n- Safety system with humanization and rate limiting\n- Next.js dashboard with real-time updates\n- Docker deployment with PostgreSQL, Redis, monitoring\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nCo-Authored-By: Claude <noreply@anthropic.com>\nEOF\n)\")",
+      "Bash(git push:*)"
     ],
     "deny": [],
     "ask": []

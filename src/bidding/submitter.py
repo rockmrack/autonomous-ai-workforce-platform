@@ -252,7 +252,7 @@ class ProposalSubmitter:
         self,
         proposal_id: UUID,
     ) -> dict:
-        """Withdraw a submitted proposal"""
+        """Withdraw a submitted proposal from the platform"""
         async with db_manager.session() as session:
             result = await session.execute(
                 select(Proposal).where(Proposal.id == proposal_id)
@@ -265,16 +265,108 @@ class ProposalSubmitter:
             if proposal.status not in [ProposalStatus.SUBMITTED, ProposalStatus.VIEWED]:
                 return {"success": False, "error": f"Cannot withdraw proposal in status: {proposal.status}"}
 
-            # TODO: Call platform API to withdraw
-            # For now, just update our records
+            # Get the associated job to determine platform
+            job_result = await session.execute(
+                select(DiscoveredJob).where(DiscoveredJob.id == proposal.job_id)
+            )
+            job = job_result.scalar_one_or_none()
+
+            if not job:
+                return {"success": False, "error": "Associated job not found"}
+
+            # Attempt platform withdrawal
+            platform_result = await self._withdraw_from_platform(
+                platform=job.platform,
+                platform_proposal_id=proposal.platform_proposal_id,
+                job=job,
+            )
+
+            if not platform_result["success"]:
+                logger.warning(
+                    "Platform withdrawal failed, marking local only",
+                    proposal_id=str(proposal_id),
+                    error=platform_result.get("error"),
+                )
+
+            # Update our records regardless (mark as withdrawn)
             proposal.status = ProposalStatus.WITHDRAWN
+            proposal.metadata_json = proposal.metadata_json or {}
+            proposal.metadata_json["withdrawal"] = {
+                "timestamp": datetime.utcnow().isoformat(),
+                "platform_success": platform_result["success"],
+                "platform_error": platform_result.get("error"),
+            }
 
             session.add(proposal)
             await session.commit()
 
-            logger.info("Proposal withdrawn", proposal_id=str(proposal_id))
+            logger.info(
+                "Proposal withdrawn",
+                proposal_id=str(proposal_id),
+                platform_success=platform_result["success"],
+            )
 
-            return {"success": True, "proposal_id": str(proposal_id)}
+            return {
+                "success": True,
+                "proposal_id": str(proposal_id),
+                "platform_withdrawn": platform_result["success"],
+            }
+
+    async def _withdraw_from_platform(
+        self,
+        platform: str,
+        platform_proposal_id: Optional[str],
+        job: DiscoveredJob,
+    ) -> dict:
+        """
+        Withdraw proposal from the actual freelance platform.
+        Returns success status and any error message.
+        """
+        if not platform_proposal_id:
+            return {"success": False, "error": "No platform proposal ID available"}
+
+        try:
+            # Get platform client
+            from src.discovery.platforms import get_platform_client
+
+            client = get_platform_client(platform)
+            if not client:
+                return {"success": False, "error": f"No client available for platform: {platform}"}
+
+            # Each platform has different withdrawal mechanisms
+            if platform == "upwork":
+                # Upwork API call to withdraw proposal
+                result = await client.withdraw_proposal(
+                    proposal_id=platform_proposal_id,
+                    job_id=job.platform_job_id,
+                )
+                return result
+
+            elif platform == "fiverr":
+                # Fiverr doesn't allow proposal withdrawal in the same way
+                # Offers can be cancelled
+                result = await client.cancel_offer(
+                    offer_id=platform_proposal_id,
+                )
+                return result
+
+            else:
+                # Generic attempt for other platforms
+                if hasattr(client, "withdraw_proposal"):
+                    result = await client.withdraw_proposal(
+                        proposal_id=platform_proposal_id,
+                    )
+                    return result
+                return {"success": False, "error": f"Platform {platform} does not support withdrawal"}
+
+        except Exception as e:
+            logger.error(
+                "Platform withdrawal error",
+                platform=platform,
+                proposal_id=platform_proposal_id,
+                error=str(e),
+            )
+            return {"success": False, "error": str(e)}
 
     async def get_proposal_status(
         self,

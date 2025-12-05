@@ -5,7 +5,7 @@ FastAPI Application - Main API for the AI Workforce Platform
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 import structlog
@@ -14,7 +14,9 @@ from config import settings
 from src.core.database import init_db, close_db
 from src.core.cache import cache_manager
 from src.core.exceptions import WorkforceException
+from src.core.container import container, get_container
 from src.orchestration.scheduler import workforce_scheduler
+from src.api.middleware.auth import AuthMiddleware
 
 logger = structlog.get_logger(__name__)
 
@@ -31,6 +33,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # Initialize cache
     await cache_manager.initialize()
 
+    # Initialize dependency container
+    await container.initialize()
+
     # Start scheduler (if enabled)
     if settings.features.auto_bidding:
         await workforce_scheduler.start()
@@ -45,11 +50,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # Stop scheduler
     await workforce_scheduler.stop()
 
-    # Close cache
-    await cache_manager.close()
-
-    # Close database
-    await close_db()
+    # Shutdown container (handles cache and db cleanup)
+    await container.shutdown()
 
     logger.info("AI Workforce Platform stopped")
 
@@ -65,13 +67,19 @@ def create_app() -> FastAPI:
         redoc_url="/api/redoc" if settings.debug else None,
     )
 
-    # CORS middleware
+    # Authentication middleware (must be added before CORS)
+    app.add_middleware(
+        AuthMiddleware,
+        api_key=settings.api_key.get_secret_value(),
+    )
+
+    # CORS middleware - use configured allowed origins
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"] if settings.debug else ["https://yourdomain.com"],
+        allow_origins=settings.allowed_origins,
         allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
+        allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH"],
+        allow_headers=["X-API-Key", "Content-Type", "Authorization"],
     )
 
     # Exception handlers

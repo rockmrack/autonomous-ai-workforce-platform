@@ -22,6 +22,7 @@ from tenacity import (
 
 from config import settings
 from src.core.events import Event, event_bus
+from src.core.circuit_breaker import circuit_breaker, CircuitBreakerError
 
 logger = structlog.get_logger(__name__)
 
@@ -135,6 +136,7 @@ class AnthropicClient(BaseLLMClient):
         output_cost = (output_tokens / 1_000_000) * costs["output"]
         return input_cost + output_cost
 
+    @circuit_breaker("anthropic_api", failure_threshold=3, timeout=60.0)
     @retry(
         retry=retry_if_exception_type((anthropic.RateLimitError, anthropic.APIConnectionError)),
         wait=wait_exponential(multiplier=1, min=4, max=60),
