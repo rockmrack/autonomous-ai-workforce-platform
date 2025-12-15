@@ -169,7 +169,7 @@ class Settings(BaseSettings):
 
     # Application
     app_name: str = Field(default="ai-workforce-platform")
-    app_env: Literal["development", "staging", "production"] = Field(
+    app_env: Literal["development", "staging", "production", "test"] = Field(
         default="development"
     )
     debug: bool = Field(default=False)

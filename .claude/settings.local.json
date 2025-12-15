@@ -1,10 +1,7 @@
 {
   "permissions": {
     "allow": [
-      "Bash(git add:*)",
-      "Bash(git commit -m \"$(cat <<''EOF''\nAdd complete AI Workforce Platform with 10x enhancements\n\n- Multi-model AI orchestration (Anthropic Claude, OpenAI GPT)\n- ML-powered job scoring and success prediction\n- Comprehensive agent management with persona generation\n- Multi-platform job discovery (Upwork, Fiverr, Reddit)\n- Task execution engine with specialized executors\n- Intelligent bidding with A/B tested proposals\n- Communication handler with sentiment analysis\n- Quality assurance with plagiarism/AI detection\n- Safety system with humanization and rate limiting\n- Next.js dashboard with real-time updates\n- Docker deployment with PostgreSQL, Redis, monitoring\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nCo-Authored-By: Claude <noreply@anthropic.com>\nEOF\n)\")",
-      "Bash(git push:*)",
-      "Bash(git commit -m \"$(cat <<''EOF''\nAdd security hardening, performance fixes, and test suite\n\nSecurity:\n- API key authentication middleware with secure hash comparison\n- Remove pickle serialization (security risk), use safe JSON encoding\n- CORS configuration with explicit allowed origins\n- Required DATABASE_URL and API_KEY (no default credentials)\n\nPerformance:\n- Fix N+1 query in get_fleet_summary() using GROUP BY\n- Add comprehensive database indexes for all major tables\n- Circuit breaker pattern for external API fault tolerance\n\nArchitecture:\n- Dependency injection container for service management\n- Extended exception hierarchy (Database, Cache, Validation, External)\n- Real metrics calculation (revenue, success rate) instead of hardcoded\n\nDashboard:\n- API client with axios for backend integration\n- Real-time system health from API\n- Live job data fetching\n\nTesting:\n- Pytest configuration with markers (unit, integration, slow)\n- Fixtures for database, mocks, and sample data\n- Unit tests for circuit breaker, cache, exceptions, container\n- Integration tests for API endpoints and auth\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nCo-Authored-By: Claude <noreply@anthropic.com>\nEOF\n)\")"
+      "Bash(git commit:*)"
     ],
     "deny": [],
     "ask": []

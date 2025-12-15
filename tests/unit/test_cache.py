@@ -246,7 +246,7 @@ class TestCachedDecorator:
             key_parts = ["test_func"]
             key_parts.extend(str(arg) for arg in args)
             key_parts.extend(f"{k}={v}" for k, v in sorted(kwargs.items()))
-            return hashlib.md5(":".join(key_parts).encode()).hexdigest()
+            return hashlib.sha256(":".join(key_parts).encode()).hexdigest()
 
         key1 = build_key(1, 2, name="test")
         key2 = build_key(1, 2, name="other")
